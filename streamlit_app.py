@@ -28,7 +28,10 @@ refresh_rate = st.sidebar.slider(
 if live_mode:
     st.sidebar.info("Live mode simulates real-time GPS updates")
     time.sleep(0.1)
-    st.experimental_rerun()
+   if live_mode:
+    time.sleep(refresh_rate)
+    st.rerun()
+
 
 # --------------------------------
 # MOCK GPS API
