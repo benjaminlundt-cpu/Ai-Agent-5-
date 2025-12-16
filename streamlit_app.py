@@ -28,9 +28,10 @@ refresh_rate = st.sidebar.slider(
 if live_mode:
     st.sidebar.info("Live mode simulates real-time GPS updates")
     time.sleep(0.1)
-   if live_mode:
+    if live_mode:
     time.sleep(refresh_rate)
     st.rerun()
+
 
 
 # --------------------------------
