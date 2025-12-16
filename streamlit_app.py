@@ -12,26 +12,32 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("⚽ Soccer Injury Prediction & Prevention AI")
-st.caption("Live GPS monitoring | Session planning | Browser-only demo")
+st.title("⚽ Soccer Injury Prediction & Session Planning AI")
+st.caption("Browser-only | Explainable | Elite soccer workflow")
 
 # --------------------------------
-# AUTO REFRESH (LIVE MODE)
+# SIDEBAR — LIVE MODE
 # --------------------------------
 st.sidebar.header("Live Settings")
 
-live_mode = st.sidebar.checkbox("📡 Live Training Mode", value=True)
-refresh_rate = st.sidebar.slider(
-    "Refresh every (seconds)", 10, 120, 30
-)
-
-if live_mode:
-    st.sidebar.info("Live mode simulates real-time GPS updates")
-    time.sleep(0.1)
-    st.experimental_rerun()
+live_mode = st.sidebar.checkbox("📡 Live Training Mode", value=False)
+refresh_rate = st.sidebar.slider("Refresh every (seconds)", 10, 120, 30)
 
 # --------------------------------
-# MOCK GPS API
+# SIDEBAR — MATCH CONTEXT
+# --------------------------------
+st.sidebar.header("Match Context")
+
+days_to_match = st.sidebar.selectbox(
+    "Days Until Next Match",
+    options=[0, 1, 2, 3, 4, 5, 6],
+    format_func=lambda x: "MD" if x == 0 else f"MD-{x}"
+)
+
+match_congestion = st.sidebar.checkbox("Fixture Congestion")
+
+# --------------------------------
+# MOCK GPS DATA (API SIMULATION)
 # --------------------------------
 def get_mock_gps_data():
     players = []
@@ -42,28 +48,21 @@ def get_mock_gps_data():
             "high_speed_distance": np.random.randint(300, 1500),
             "accelerations": np.random.randint(40, 95),
             "decelerations": np.random.randint(40, 95),
-            "session_rpe": np.random.uniform(4.5, 8.5),
+            "rpe": np.random.uniform(4.5, 8.5),
             "duration": np.random.randint(60, 110),
+            "fatigue_z": np.random.normal(0.5, 0.8),
+            "soreness_z": np.random.normal(0.4, 0.7),
+            "acwr": np.random.uniform(0.7, 1.8),
         })
     return pd.DataFrame(players)
 
 # --------------------------------
-# FEATURE ENGINEERING
+# INJURY RISK ENGINE
 # --------------------------------
-def build_features(df):
-    df = df.copy()
-    df["session_load"] = df["session_rpe"] * df["duration"]
-    df["acwr"] = np.random.uniform(0.7, 1.8, len(df))
-    df["fatigue_z"] = np.random.normal(0.5, 0.8, len(df))
-    df["soreness_z"] = np.random.normal(0.4, 0.7, len(df))
-    return df
-
-# --------------------------------
-# RISK ENGINE
-# --------------------------------
-def compute_injury_risk(acwr, fatigue, soreness, hsr, acc, dec, congestion=False, rtp=False):
+def compute_injury_risk(acwr, fatigue, soreness, hsr, acc, dec, congestion, rtp):
     risk = 0.0
 
+    # ACWR
     if acwr > 1.6:
         risk += 0.40
     elif acwr > 1.3:
@@ -71,86 +70,75 @@ def compute_injury_risk(acwr, fatigue, soreness, hsr, acc, dec, congestion=False
     elif acwr < 0.8:
         risk += 0.10
 
+    # Wellness
     risk += max(0, fatigue) * 0.12
     risk += max(0, soreness) * 0.15
 
+    # High-speed running
     if hsr > 1200:
         risk += 0.20
     elif hsr > 800:
         risk += 0.10
 
+    # Acc / Dec
     if acc + dec > 140:
         risk += 0.15
     elif acc + dec > 100:
         risk += 0.08
 
+    # Congestion & RTP
     if congestion:
         risk += 0.15
-
     if rtp:
         risk *= 1.25
 
     return min(risk, 1.0)
 
 # --------------------------------
-# SESSION PLANNING AGENT
+# SESSION PLANNING ENGINE (MD-AWARE)
 # --------------------------------
-def session_plan(risk, rtp):
+def session_plan(risk, rtp, days_to_match):
+    if days_to_match == 0:
+        return "MATCH DAY", "Game Load", "Match Demands"
+
     if rtp:
-        return {
-            "Session Type": "Return-to-Play",
-            "Load Target": "Low–Moderate",
-            "HSR Limit": "< 60%",
-            "Accel/Decel": "Controlled",
-        }
+        return "Return-to-Play", "Low–Moderate", "< 60% HSR"
 
+    if days_to_match == 1:
+        return "MD-1 Activation", "Very Low", "< 50% HSR"
+
+    if days_to_match == 2:
+        if risk >= 0.55:
+            return "MD-2 Modified", "-30% Load", "< 60% HSR"
+        else:
+            return "MD-2 Tactical", "Moderate", "< 75% HSR"
+
+    # MD-3+
     if risk >= 0.75:
-        return {
-            "Session Type": "Recovery / Medical",
-            "Load Target": "Very Low",
-            "HSR Limit": "None",
-            "Accel/Decel": "None",
-        }
+        return "Recovery / Medical", "Very Low", "None"
     elif risk >= 0.55:
-        return {
-            "Session Type": "Modified Training",
-            "Load Target": "-30%",
-            "HSR Limit": "< 70%",
-            "Accel/Decel": "Reduced",
-        }
+        return "Modified Training", "-30%", "< 70% HSR"
     elif risk >= 0.35:
-        return {
-            "Session Type": "Normal Training",
-            "Load Target": "Normal",
-            "HSR Limit": "< 85%",
-            "Accel/Decel": "Monitor",
-        }
+        return "Normal Training", "Normal", "< 85% HSR"
     else:
-        return {
-            "Session Type": "Full Training",
-            "Load Target": "Full",
-            "HSR Limit": "No limit",
-            "Accel/Decel": "Full",
-        }
+        return "Full Training", "Full", "No Limit"
 
 # --------------------------------
-# SIDEBAR CONTEXT
+# RTP SELECTION
 # --------------------------------
-st.sidebar.header("Context")
-
-match_congestion = st.sidebar.checkbox("Match Congestion")
+st.sidebar.header("Return-to-Play")
 rtp_players = st.sidebar.multiselect(
-    "Return-to-Play Players",
+    "Players in RTP",
     [f"Player {i+1}" for i in range(25)]
 )
 
 # --------------------------------
 # PIPELINE
 # --------------------------------
-gps = get_mock_gps_data()
-df = build_features(gps)
+df = get_mock_gps_data()
 
-risks, plans = [], []
+risks = []
+plans = []
 
 for _, r in df.iterrows():
     risk = compute_injury_risk(
@@ -160,53 +148,85 @@ for _, r in df.iterrows():
         r["high_speed_distance"],
         r["accelerations"],
         r["decelerations"],
-        congestion=match_congestion,
-        rtp=r["player"] in rtp_players
+        match_congestion,
+        r["player"] in rtp_players
     )
-    risks.append(risk)
-    plans.append(session_plan(risk, r["player"] in rtp_players))
+    plan = session_plan(risk, r["player"] in rtp_players, days_to_match)
 
-df["risk_pct"] = np.array(risks) * 100
-df["session_plan"] = plans
+    risks.append(risk * 100)
+    plans.append(plan)
+
+df["Injury Risk (%)"] = risks
+df["Session Type"] = [p[0] for p in plans]
+df["Load Target"] = [p[1] for p in plans]
+df["HSR Limit"] = [p[2] for p in plans]
 
 # --------------------------------
 # SQUAD VIEW
 # --------------------------------
-st.subheader("🧑‍🤝‍🧑 Live Squad Risk")
+st.subheader("🧑‍🤝‍🧑 Squad Injury Risk Overview")
 
 st.dataframe(
-    df[["player", "risk_pct"]]
-    .sort_values("risk_pct", ascending=False),
+    df[["player", "Injury Risk (%)", "Session Type"]]
+    .sort_values("Injury Risk (%)", ascending=False),
     use_container_width=True
 )
 
 # --------------------------------
-# PLAYER DETAIL + SESSION PLAN
+# PLAYER DETAIL VIEW
 # --------------------------------
-st.subheader("📅 Session Planning Recommendation")
+st.subheader("📅 Individual Session Planning")
 
 player = st.selectbox("Select Player", df["player"])
 p = df[df.player == player].iloc[0]
-plan = p.session_plan
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Injury Risk", f"{p.risk_pct:.1f}%")
+col1.metric("Injury Risk", f"{p['Injury Risk (%)']:.1f}%")
 col2.metric("ACWR", f"{p.acwr:.2f}")
 col3.metric("HSR (m)", int(p.high_speed_distance))
 
-st.success(f"**Recommended Session:** {plan['Session Type']}")
+st.success(f"**Recommended Session:** {p['Session Type']}")
 
 st.markdown(
 f"""
-- **Load Target:** {plan['Load Target']}
-- **High-Speed Running:** {plan['HSR Limit']}
-- **Accelerations / Decelerations:** {plan['Accel/Decel']}
+- **Load Target:** {p['Load Target']}
+- **High-Speed Running:** {p['HSR Limit']}
 """
 )
+
+# --------------------------------
+# EXPLAINABILITY
+# --------------------------------
+st.subheader("🧠 Risk Drivers")
+
+drivers = []
+if p.acwr > 1.3:
+    drivers.append("📈 Acute workload spike (ACWR)")
+if p.fatigue_z > 1:
+    drivers.append("😴 Elevated fatigue")
+if p.soreness_z > 1:
+    drivers.append("🦵 Increased muscle soreness")
+if p.high_speed_distance > 800:
+    drivers.append("🏃 High-speed running exposure")
+if p.accelerations + p.decelerations > 120:
+    drivers.append("⚡ High neuromuscular load")
+
+if drivers:
+    for d in drivers:
+        st.write(d)
+else:
+    st.write("✅ No major injury risk flags detected")
 
 # --------------------------------
 # FOOTER
 # --------------------------------
 st.caption(
-    f"Live demo updated at {datetime.now().strftime('%H:%M:%S')} | Elite soccer workflow simulation"
+    f"Last updated {datetime.now().strftime('%H:%M:%S')} | Elite soccer injury prevention demo"
 )
+
+# --------------------------------
+# LIVE REFRESH (SAFE)
+# --------------------------------
+if live_mode:
+    time.sleep(refresh_rate)
+    st.rerun()
